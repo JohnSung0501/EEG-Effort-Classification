@@ -40,6 +40,8 @@ This phase performs self-supervised learning (SSL) on unlabeled EEG data from th
 
 ### Step 1 – Preprocess Source Domain Data (`1_dataproc_source.py`)
 
+python 1_dataproc_source.py
+
 Purpose: Preprocess EEG data from all source domain subjects.
 
 Input: Raw EEG data files (e.g., from Linux_data_T100)
@@ -72,6 +74,8 @@ Output: Pickled .p files
 
 Step 2 – Run SSL Pretraining (2_P1_SSL.py)
 
+python 2_P1_SSL.py
+
 Purpose: Train a self-supervised EEG encoder.
 
 Input: Preprocessed .p files + SSL config (e.g., masking, loss)
@@ -84,6 +88,7 @@ This phase performs incremental learning (IL), adding subjects task-by-task from
 It uses the pre-trained model ssl_model.h5 from Phase 1 as the initialization for continual learning.
 
 Run Incremental Training (3_P2_IL.py)
+python 3_P2_IL.py
 
 Purpose: Train a model incrementally across tasks.
 
@@ -121,6 +126,7 @@ It uses the model EEG_CNN_inc_100subs.hdf5 from Phase 2 as the pre-trained initi
 
 Step 1 – Preprocess Target Subject Data (4_dataproc_target.py)
 Purpose: Preprocess data for each of the 20 target subjects.
+python 4_dataproc_target.py
 
 Input: Raw data folders:
 /sub1/fold1/
@@ -142,6 +148,9 @@ Preprocessed .p file
 Pre-trained model: EEG_CNN_inc_100subs.hdf5
 
 Path: Data_target_Sub_20/model/pre_model/EEG_CNN_inc_100subs.hdf5
+
+
+python 5_FT_target.py
 
 Output:
 
