@@ -1,154 +1,169 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Fri Sep 28 12:23:43 2018
 
-@author: winstonlin
-"""
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-
-
-import scipy.io
-import numpy as np
-
-import random
-import pdb
+import os
 import re
 import pickle
-import os
-
+import random
+import numpy as np
 from os.path import join
-from os.path import sep as filesep
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, filtfilt
 
-random.seed(999)
+# ============================================================
+# Global config
+# ============================================================
+RANDOM_SEED = 999
+FS = 1000
+LOWCUT = 7.0
+HIGHCUT = 13.0
+FILTER_ORDER = 5
 
-##### #### #### #### #### #### #### function #### #### #### #### #### #### #### 
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
 
-def readEEGFolder(InpPath, label=0, Tot_Class=3, NmeMode=False):
-
-    if os.path.isdir(InpPath):
-        FilList=os.listdir(InpPath)
-        EEGData=[]
-        for filename in sorted(FilList):
-            with open(join(InpPath,filename)) as f:
-                EEGData.append(EEGParRead(f.readline().strip()))
-                EEGData[-1].update(dict([('ChannelName',f.readline().strip())]))
-                if NmeMode:
-                    EEGData[-1].update(EEGFileName(re.sub('\s+',' ',filename)))
-                else:
-                    EEGData[-1].update(dict([('FilNme',re.sub('\s+',' ',filename))]))
-
-                Data=np.zeros((int(EEGData[-1]['TimePoints']),int(EEGData[-1]['Channels'])))
-                lineInd=0
-                for lineData in f.readlines():
-                    Data[lineInd,:]=np.array([float(i) for i in re.sub('\s+',' ',lineData.strip()).split(' ')])
-                    lineInd+=1
-                #pdb.set_trace()
-                fs = 1000  # 
-                lowcut =  7 # 
-                highcut = 13.0  # 
-                num_channels = 60
-                num_samples = 2691
-                eeg_data = Data
-                filtered_data = np.zeros_like(eeg_data)
-                for ch in range(num_channels):
-                    filtered_data[:, ch] = bandpass_filter(eeg_data[:, ch], lowcut, highcut, fs, order=5)
-                #pdb.set_trace()
-                #EEGData[-1].update(dict([('data',Data)]))#raw data
-                EEGData[-1].update(dict([('data',filtered_data)]))#add BPF
-                EEGData[-1].update(dict([('label',label)]))
-                #pdb.set_trace()
-
-    return EEGData
-
-def butter_bandpass(lowcut, highcut, fs, order=5):#order = 5
-    nyq = 0.5 * fs  # 
+# ============================================================
+# Signal processing
+# ============================================================
+def butter_bandpass(lowcut, highcut, fs, order):
+    nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
-    b, a = butter(order, [low, high], btype='band')
-    return b, a
+    return butter(order, [low, high], btype='band')
 
-def bandpass_filter(data, lowcut, highcut, fs, order=5):
-    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
-    y = lfilter(b, a, data)
-    return y
-def EEGFileName(InpFileName):
-    Header={}
-    StrList=InpFileName.split(' ')
-    Header.update(dict([('Name',StrList[0])]))
-    Header.update(dict([('Age',float(StrList[1][0:-1]))]))
-    for par in list(range(2,len(StrList))):
-        if StrList[par].split('.')[0].upper() == 'awake'.upper():
-            Header.update(dict([('Status',StrList[par]+'_'+StrList[par+1])]))
-        elif StrList[par].split('.')[0].upper() == 'sleep'.upper():
-            Header.update(dict([('Status',StrList[par])]))
+def bandpass_filter(data_1d):
+    b, a = butter_bandpass(LOWCUT, HIGHCUT, FS, FILTER_ORDER)
+    return filtfilt(b, a, data_1d).astype(np.float32)
 
-    return Header
+# ============================================================
+# Robust EEG header parser (FINAL)
+# ============================================================
+def EEGParRead(header_line):
+    header = {}
 
-def EEGParRead(InpString):
-    EEGHeader={}
-    StrList=InpString.split(' ')
-    for par in StrList:
-        EEGHeader.update(dict([(par.split('=')[0],par.split('=')[1])]))
+    # 1) key=value
+    for k, v in re.findall(r'(\w+)\s*=\s*([^\s]+)', header_line):
+        header[k] = v
 
-    return EEGHeader
+    # 2) fallback: "Channels 60", "TimePoints 2691"
+    tokens = header_line.split()
+    for i in range(len(tokens) - 1):
+        if tokens[i] in ('Channels', 'TimePoints') and tokens[i] not in header:
+            header[tokens[i]] = tokens[i + 1]
 
-def get_filepaths(directory):
+    if 'TimePoints' not in header or 'Channels' not in header:
+        raise ValueError(f"Invalid EEG header format: {header_line}")
 
-    OutList = []
-    for root, directories, files in os.walk(directory):
-        filepath = os.path.join(root, filename)
-        OutList.append(filepath)
+    return header
 
-    return OutList
+# ============================================================
+# Core loader (FINAL, dual-format compatible)
+# ============================================================
+def readEEGFolder(folder_path, label):
 
-##### #### #### #### #### #### #### main #### #### #### #### #### #### #### 
+    if not os.path.isdir(folder_path):
+        print(f"[WARN] Folder not found: {folder_path}")
+        return []
 
+    eeg_trials = []
 
+    # strict EEG channel pattern
+    channel_pattern = re.compile(
+        r'^(FP|AF|F|FC|C|CP|P|PO|O)[0-9Z]+$', re.IGNORECASE
+    )
 
-# Loop through sub_id from 01 to 50
-for sub_id in range(1, 101):#J 1~100
-    # Format sub_id to be two digits (e.g., '01', '02', ..., '50')
-    sub_id_str = f'{sub_id:02}'
-    #sub_id_str = str(sub_id)
+    for fname in sorted(os.listdir(folder_path)):
+        fpath = join(folder_path, fname)
 
-    # Paths using the variable sub_id_str
-    TrainPath1_sub = f'/data2/user_johnsung/EEG_data/100P_file/Linux_data_T100/train/EEG_data1_1p/T{sub_id_str}'
-    TrData_sub_1 = readEEGFolder(TrainPath1_sub, label=0)
-    TrainPath2_sub = f'/data2/user_johnsung/EEG_data/100P_file/Linux_data_T100/train/EEG_data2_1p/T{sub_id_str}'
-    TrData_sub_2 = readEEGFolder(TrainPath2_sub, label=1)
+        try:
+            with open(fpath, 'r') as f:
+                first_line = f.readline().strip()
 
-    # Combine the training data into a list
-    Train_list_sub = []
-    for inData_sub in [TrData_sub_1, TrData_sub_2]:
-        for DataList_sub in inData_sub:
-            Train_list_sub.append(DataList_sub)
-    #pdb.set_trace()
-    # Testing paths
-    TestPath1_sub = f'/data2/user_johnsung/EEG_data/100P_file/Linux_data_T100/test/EEG_data1_1p/T{sub_id_str}'
-    TsData_1_sub = readEEGFolder(TestPath1_sub, label=0)
-    TestPath2_sub = f'/data2/user_johnsung/EEG_data/100P_file/Linux_data_T100/test/EEG_data2_1p/T{sub_id_str}'
-    TsData_2_sub = readEEGFolder(TestPath2_sub, label=1)
+                # ---------- parse header ----------
+                header = EEGParRead(first_line)
+                timepoints = int(header['TimePoints'])
+                channels = int(header['Channels'])
 
-    # Combine the test data into a list
-    Test_list_sub = []
-    for inData_sub in [TsData_1_sub, TsData_2_sub]:
-        for DataList_sub in inData_sub:
-            Test_list_sub.append(DataList_sub)
+                # ---------- detect inline channel ----------
+                tokens = first_line.split()
+                channel_like = [t for t in tokens if channel_pattern.match(t)]
 
-    # Validation data is the same as test data
-    Valid_list_sub = Test_list_sub
+                channel_inline = len(channel_like) >= channels // 2
 
-    # Save the data to pickle files for each sub_id
-    with open(f'Training_sub{sub_id_str}.p', 'wb') as f:
-        pickle.dump(Train_list_sub, f)
-    with open(f'Validation_sub{sub_id_str}.p', 'wb') as f:
-        pickle.dump(Valid_list_sub, f)
-    with open(f'Testing_sub{sub_id_str}.p', 'wb') as f:
-        pickle.dump(Test_list_sub, f)
+                if channel_inline:
+                    # format B: header + channel inline
+                    channel_name = ' '.join(channel_like[:channels])
+                else:
+                    # format A: channel names on second line
+                    channel_name = f.readline().strip()
 
+                # ---------- read EEG data ----------
+                data = np.zeros((timepoints, channels), dtype=np.float32)
 
+                for i in range(timepoints):
+                    line = f.readline()
+                    if not line:
+                        raise ValueError("Unexpected EOF while reading EEG data")
 
+                    row = np.fromstring(line, sep=' ', dtype=np.float32)
+
+                    if row.size != channels:
+                        raise ValueError(
+                            f"Channel mismatch: expect {channels}, got {row.size}"
+                        )
+
+                    data[i, :] = row
+
+            # ---------- band-pass filtering ----------
+            filtered = np.zeros_like(data, dtype=np.float32)
+            for ch in range(channels):
+                filtered[:, ch] = bandpass_filter(data[:, ch])
+
+            eeg_trials.append({
+                'TimePoints': timepoints,
+                'Channels': channels,
+                'ChannelName': channel_name,
+                'FilNme': re.sub(r'\s+', ' ', fname),
+                'data': filtered,
+                'label': label
+            })
+
+        except Exception as e:
+            print(f"[ERROR] {fpath}")
+            print(f"        {str(e)}")
+            continue
+
+    return eeg_trials
+
+# ============================================================
+# Main: subject-wise export
+# ============================================================
+for sub_id in range(1, 51):
+
+    sub = f"{sub_id:02}"
+    print(f"\n==== Processing Subject {sub} ====")
+
+    train_list = []
+    test_list = []
+
+    # training
+    train_list += readEEGFolder(f'./train/data1/T{sub}', label=0)
+    train_list += readEEGFolder(f'./train/data2/T{sub}', label=1)
+
+    # testing
+    test_list += readEEGFolder(f'./test/data1/T{sub}', label=0)
+    test_list += readEEGFolder(f'./test/data2/T{sub}', label=1)
+
+    if len(train_list) == 0 or len(test_list) == 0:
+        print(f"[WARN] Subject {sub}: empty dataset, skipped saving.")
+        continue
+
+    with open(f'Training_sub{sub}.p', 'wb') as f:
+        pickle.dump(train_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    with open(f'Validation_sub{sub}.p', 'wb') as f:
+        pickle.dump(test_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    with open(f'Testing_sub{sub}.p', 'wb') as f:
+        pickle.dump(test_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print(f"✔ Subject {sub}: Train={len(train_list)}, Test={len(test_list)}")
