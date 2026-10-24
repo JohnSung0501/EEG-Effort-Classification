@@ -390,7 +390,7 @@ while True:
     cnneeg = CNNMDL(SavMdlPth, Epoch, 0)
     cnneeg.build(InpTD, 2, LayerNodes)
 
-    pretrained_model_path = './model/pre_model/EEG_CNN_100subs' 
+    pretrained_model_path = './model/pre_model/EEG_CNN_inc_100subs' 
     fine_tune_layers = 3
     cnneeg.finetune(Trh5_sub1, Vah5_sub1, Cfg, pretrained_model_path, fine_tune_layers)
     run_best_val_loss = get_best_val_loss_from_history(cnneeg.Hist)
