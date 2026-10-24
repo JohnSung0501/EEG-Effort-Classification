@@ -123,7 +123,7 @@ def main():
     # load data
     Trh5_subs = []
     Vah5_subs = []
-    for sub_id in range(1, 101):#1~100
+    for sub_id in range(1, 51):#1~100
         train_file = f'Training_sub{sub_id:02d}.p'
         valid_file = f'Validation_sub{sub_id:02d}.p'
 
@@ -143,7 +143,7 @@ def main():
 
     model = create_ssl_model(input_shape=Cfg['input_shape'])
     model.summary()
-    pdb.set_trace()
+    # pdb.set_trace()
 
 
     model.fit(
